@@ -5,7 +5,7 @@ import { useToast } from '@/components/ui/use-toast';
 import WaveformDisplay from './WaveformDisplay';
 import AudioControls from './AudioControls';
 import MarkersList from './MarkersList';
-import { detectSilence } from '@/utils/audioProcessing';
+import { detectSilence, exportAudioSegments } from '@/utils/audioProcessing';
 
 const AudioSplitter = () => {
   const waveformRef = useRef<HTMLDivElement>(null);
@@ -115,15 +115,40 @@ const AudioSplitter = () => {
       return;
     }
 
+    if (markers.length === 0) {
+      toast({
+        title: "错误",
+        description: "请先添加分割点",
+        variant: "destructive",
+      });
+      return;
+    }
+
     toast({
       title: "导出中",
       description: "正在处理音频分段...",
     });
 
-    toast({
-      title: "功能开发中",
-      description: "音频分割功能即将推出",
-    });
+    try {
+      const audioData = wavesurfer.current.getDecodedData();
+      if (!audioData) {
+        throw new Error('无法获取音频数据');
+      }
+
+      await exportAudioSegments(audioData, markers, audioFile.name);
+
+      toast({
+        title: "导出成功",
+        description: "音频分段已成功导出为 ZIP 文件",
+      });
+    } catch (error) {
+      console.error('导出失败:', error);
+      toast({
+        title: "导出失败",
+        description: "处理音频分段时发生错误",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
