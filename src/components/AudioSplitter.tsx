@@ -75,7 +75,6 @@ const AudioSplitter = () => {
     });
 
     try {
-      // 使用 getDecodedData 获取音频数据
       const audioData = wavesurfer.current.getDecodedData();
       if (!audioData) {
         throw new Error('无法获取音频数据');
@@ -83,20 +82,18 @@ const AudioSplitter = () => {
 
       const duration = wavesurfer.current.getDuration();
       const sampleRate = audioData.sampleRate;
-      const channels = audioData.getChannelData(0); // 获取第一个声道的数据
+      const channels = audioData.getChannelData(0);
       
-      const samplesPerSegment = Math.floor(sampleRate * 0.1); // 每0.1秒一个分析窗口
-      const threshold = 0.05; // 振幅阈值
-      const minSilenceLength = 0.5; // 最小静音长度（秒）
+      const samplesPerSegment = Math.floor(sampleRate * 0.1);
+      const threshold = 0.05;
+      const minSilenceLength = 0.5;
       
       const silencePoints: number[] = [];
       let isSilent = false;
       let silenceStart = 0;
       let currentSum = 0;
       
-      // 分析音频数据
       for (let i = 0; i < channels.length; i += samplesPerSegment) {
-        // 计算当前窗口的平均振幅
         currentSum = 0;
         const segmentEnd = Math.min(i + samplesPerSegment, channels.length);
         
@@ -115,13 +112,11 @@ const AudioSplitter = () => {
           const silenceLength = currentTime - silenceStart;
           
           if (silenceLength >= minSilenceLength) {
-            // 在静音段中间添加标记
             silencePoints.push(silenceStart + silenceLength / 2);
           }
         }
       }
 
-      // 更新标记点
       setMarkers(prev => [...new Set([...prev, ...silencePoints])].sort((a, b) => a - b));
       
       toast({
@@ -153,13 +148,58 @@ const AudioSplitter = () => {
       description: "正在处理音频分段...",
     });
 
-    // 这里应该添加实际的音频分割逻辑
-    // 由于浏览器API限制，实际的音频分割需要使用Web Audio API
-    // 这里只是一个示例提示
     toast({
       title: "功能开发中",
       description: "音频分割功能即将推出",
     });
+  };
+
+  const getSegmentColor = (index: number) => {
+    const colors = ['#F2FCE2', '#FEF7CD', '#FEC6A1', '#E5DEFF', '#FFDEE2', '#FDE1D3', '#D3E4FD'];
+    return colors[index % colors.length];
+  };
+
+  const renderSegments = () => {
+    if (!wavesurfer.current || markers.length === 0) return null;
+    
+    const duration = wavesurfer.current.getDuration();
+    const segments = [];
+    let startTime = 0;
+
+    markers.forEach((marker, index) => {
+      const width = ((marker - startTime) / duration) * 100;
+      segments.push(
+        <div
+          key={`segment-${index}`}
+          className="absolute top-0 bottom-0"
+          style={{
+            left: `${(startTime / duration) * 100}%`,
+            width: `${width}%`,
+            backgroundColor: getSegmentColor(index),
+            opacity: 0.2,
+            pointerEvents: 'none',
+          }}
+        />
+      );
+      startTime = marker;
+    });
+
+    const finalWidth = ((duration - startTime) / duration) * 100;
+    segments.push(
+      <div
+        key={`segment-final`}
+        className="absolute top-0 bottom-0"
+        style={{
+          left: `${(startTime / duration) * 100}%`,
+          width: `${finalWidth}%`,
+          backgroundColor: getSegmentColor(markers.length),
+          opacity: 0.2,
+          pointerEvents: 'none',
+        }}
+      />
+    );
+
+    return segments;
   };
 
   return (
@@ -204,15 +244,22 @@ const AudioSplitter = () => {
         </div>
 
         <div className="waveform-container relative">
-          <div ref={waveformRef} />
+          {renderSegments()}
+          <div ref={waveformRef} className="relative z-10" />
           {markers.map((time, index) => (
             <div
               key={index}
-              className="absolute h-full w-0.5 bg-purple-500 opacity-50"
+              className="absolute top-0 h-full"
               style={{
-                left: `${(time / (wavesurfer.current?.getDuration() || 1)) * 100}%`
+                left: `${(time / (wavesurfer.current?.getDuration() || 1)) * 100}%`,
+                zIndex: 20,
               }}
-            />
+            >
+              <div className="timeline-marker" />
+              <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 text-xs">
+                {time.toFixed(2)}s
+              </div>
+            </div>
           ))}
         </div>
 
