@@ -1,10 +1,11 @@
 
 import React, { useRef, useState, useEffect } from 'react';
 import WaveSurfer from 'wavesurfer.js';
-import { useToast } from '@/components/ui/use-toast';
+import { useToast } from '@/hooks/use-toast';
 import WaveformDisplay from './WaveformDisplay';
 import AudioControls from './AudioControls';
 import MarkersList from './MarkersList';
+import { Progress } from '@/components/ui/progress';
 import { detectSilence, exportAudioSegments } from '@/utils/audioProcessing';
 
 const AudioSplitter = () => {
@@ -14,6 +15,8 @@ const AudioSplitter = () => {
   const [markers, setMarkers] = useState<number[]>([]);
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [isReady, setIsReady] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
+  const [isExporting, setIsExporting] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -31,7 +34,7 @@ const AudioSplitter = () => {
       wavesurfer.current.on('play', () => setIsPlaying(true));
       wavesurfer.current.on('pause', () => setIsPlaying(false));
       wavesurfer.current.on('ready', () => setIsReady(true));
-      wavesurfer.current.on('unload', () => setIsReady(false));
+      wavesurfer.current.on('finish', () => setIsReady(false));
 
       return () => {
         wavesurfer.current?.destroy();
@@ -127,6 +130,9 @@ const AudioSplitter = () => {
       return;
     }
 
+    setIsExporting(true);
+    setExportProgress(0);
+    
     toast({
       title: "导出中",
       description: "正在处理音频分段...",
@@ -138,7 +144,14 @@ const AudioSplitter = () => {
         throw new Error('无法获取音频数据');
       }
 
-      await exportAudioSegments(audioData, markers, audioFile.name);
+      await exportAudioSegments(
+        audioData, 
+        markers, 
+        audioFile.name,
+        (progress) => {
+          setExportProgress(Math.round(progress * 100));
+        }
+      );
 
       toast({
         title: "导出成功",
@@ -151,6 +164,9 @@ const AudioSplitter = () => {
         description: "处理音频分段时发生错误",
         variant: "destructive",
       });
+    } finally {
+      setIsExporting(false);
+      setExportProgress(0);
     }
   };
 
@@ -172,6 +188,15 @@ const AudioSplitter = () => {
           onAutoDetect={autoDetectSilence}
           onExport={exportSegments}
         />
+
+        {isExporting && (
+          <div className="space-y-2">
+            <div className="text-sm text-muted-foreground">
+              正在导出: {exportProgress}%
+            </div>
+            <Progress value={exportProgress} className="w-full" />
+          </div>
+        )}
 
         <WaveformDisplay
           waveformRef={waveformRef}

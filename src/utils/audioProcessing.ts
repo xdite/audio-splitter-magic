@@ -71,7 +71,12 @@ const audioBufferToBlob = async (audioBuffer: AudioBuffer): Promise<Blob> => {
 };
 
 // 分割音频并导出为 ZIP
-export const exportAudioSegments = async (audioBuffer: AudioBuffer, markers: number[], fileName: string) => {
+export const exportAudioSegments = async (
+  audioBuffer: AudioBuffer, 
+  markers: number[], 
+  fileName: string,
+  onProgress?: (progress: number) => void
+) => {
   const zip = new JSZip();
   const sortedMarkers = [0, ...markers.sort((a, b) => a - b), audioBuffer.duration];
   
@@ -100,6 +105,11 @@ export const exportAudioSegments = async (audioBuffer: AudioBuffer, markers: num
     // 转换为 Blob 并添加到 ZIP
     const blob = await audioBufferToBlob(segmentBuffer);
     zip.file(`segment_${(i + 1).toString().padStart(3, '0')}.mp3`, blob);
+
+    // 更新进度
+    if (onProgress) {
+      onProgress((i + 1) / (sortedMarkers.length - 1));
+    }
   }
   
   // 生成并下载 ZIP 文件
