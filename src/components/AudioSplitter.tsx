@@ -1,8 +1,11 @@
+
 import React, { useRef, useState, useEffect } from 'react';
 import WaveSurfer from 'wavesurfer.js';
-import { Button } from '@/components/ui/button';
-import { Upload, Play, Pause, Scissors, Download, Wand2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import WaveformDisplay from './WaveformDisplay';
+import AudioControls from './AudioControls';
+import MarkersList from './MarkersList';
+import { detectSilence } from '@/utils/audioProcessing';
 
 const AudioSplitter = () => {
   const waveformRef = useRef<HTMLDivElement>(null);
@@ -80,42 +83,11 @@ const AudioSplitter = () => {
         throw new Error('无法获取音频数据');
       }
 
-      const duration = wavesurfer.current.getDuration();
-      const sampleRate = audioData.sampleRate;
-      const channels = audioData.getChannelData(0);
-      
-      const samplesPerSegment = Math.floor(sampleRate * 0.1);
-      const threshold = 0.05;
-      const minSilenceLength = 0.5;
-      
-      const silencePoints: number[] = [];
-      let isSilent = false;
-      let silenceStart = 0;
-      let currentSum = 0;
-      
-      for (let i = 0; i < channels.length; i += samplesPerSegment) {
-        currentSum = 0;
-        const segmentEnd = Math.min(i + samplesPerSegment, channels.length);
-        
-        for (let j = i; j < segmentEnd; j++) {
-          currentSum += Math.abs(channels[j]);
-        }
-        
-        const averageAmplitude = currentSum / samplesPerSegment;
-        const currentTime = (i / sampleRate);
-        
-        if (averageAmplitude < threshold && !isSilent) {
-          isSilent = true;
-          silenceStart = currentTime;
-        } else if ((averageAmplitude >= threshold || i >= channels.length - samplesPerSegment) && isSilent) {
-          isSilent = false;
-          const silenceLength = currentTime - silenceStart;
-          
-          if (silenceLength >= minSilenceLength) {
-            silencePoints.push(silenceStart + silenceLength / 2);
-          }
-        }
-      }
+      const silencePoints = await detectSilence(audioData, {
+        sampleRate: audioData.sampleRate,
+        threshold: 0.05,
+        minSilenceLength: 0.5,
+      });
 
       setMarkers(prev => [...new Set([...prev, ...silencePoints])].sort((a, b) => a - b));
       
@@ -154,54 +126,6 @@ const AudioSplitter = () => {
     });
   };
 
-  const getSegmentColor = (index: number) => {
-    const colors = ['#F2FCE2', '#FEF7CD', '#FEC6A1', '#E5DEFF', '#FFDEE2', '#FDE1D3', '#D3E4FD'];
-    return colors[index % colors.length];
-  };
-
-  const renderSegments = () => {
-    if (!wavesurfer.current || markers.length === 0) return null;
-    
-    const duration = wavesurfer.current.getDuration();
-    const segments = [];
-    let startTime = 0;
-
-    markers.forEach((marker, index) => {
-      const width = ((marker - startTime) / duration) * 100;
-      segments.push(
-        <div
-          key={`segment-${index}`}
-          className="absolute top-0 bottom-0"
-          style={{
-            left: `${(startTime / duration) * 100}%`,
-            width: `${width}%`,
-            backgroundColor: getSegmentColor(index),
-            opacity: 0.2,
-            pointerEvents: 'none',
-          }}
-        />
-      );
-      startTime = marker;
-    });
-
-    const finalWidth = ((duration - startTime) / duration) * 100;
-    segments.push(
-      <div
-        key={`segment-final`}
-        className="absolute top-0 bottom-0"
-        style={{
-          left: `${(startTime / duration) * 100}%`,
-          width: `${finalWidth}%`,
-          backgroundColor: getSegmentColor(markers.length),
-          opacity: 0.2,
-          pointerEvents: 'none',
-        }}
-      />
-    );
-
-    return segments;
-  };
-
   return (
     <div className="max-w-4xl mx-auto p-6">
       <div className="mb-8 text-center">
@@ -210,71 +134,24 @@ const AudioSplitter = () => {
       </div>
 
       <div className="space-y-6">
-        <div className="flex justify-center gap-4">
-          <Button variant="outline" onClick={() => document.getElementById('audio-upload')?.click()}>
-            <Upload className="mr-2 h-4 w-4" />
-            上传音频
-          </Button>
-          <input
-            id="audio-upload"
-            type="file"
-            accept="audio/*"
-            className="hidden"
-            onChange={handleFileUpload}
-          />
-          
-          <Button variant="outline" onClick={togglePlayPause} disabled={!audioFile}>
-            {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-          </Button>
+        <AudioControls
+          isPlaying={isPlaying}
+          audioFile={audioFile}
+          markers={markers}
+          onFileUpload={handleFileUpload}
+          onPlayPause={togglePlayPause}
+          onAddMarker={addMarker}
+          onAutoDetect={autoDetectSilence}
+          onExport={exportSegments}
+        />
 
-          <Button variant="outline" onClick={addMarker} disabled={!audioFile}>
-            <Scissors className="mr-2 h-4 w-4" />
-            添加分割点
-          </Button>
+        <WaveformDisplay
+          waveformRef={waveformRef}
+          markers={markers}
+          duration={wavesurfer.current?.getDuration() || 0}
+        />
 
-          <Button variant="outline" onClick={autoDetectSilence} disabled={!audioFile}>
-            <Wand2 className="mr-2 h-4 w-4" />
-            自动检测
-          </Button>
-
-          <Button variant="outline" onClick={exportSegments} disabled={!audioFile || markers.length === 0}>
-            <Download className="mr-2 h-4 w-4" />
-            导出片段
-          </Button>
-        </div>
-
-        <div className="waveform-container relative">
-          {renderSegments()}
-          <div ref={waveformRef} className="relative z-10" />
-          {markers.map((time, index) => (
-            <div
-              key={index}
-              className="absolute top-0 h-full"
-              style={{
-                left: `${(time / (wavesurfer.current?.getDuration() || 1)) * 100}%`,
-                zIndex: 20,
-              }}
-            >
-              <div className="timeline-marker" />
-              <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 text-xs">
-                {time.toFixed(2)}s
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {markers.length > 0 && (
-          <div className="mt-4">
-            <h3 className="text-lg font-semibold mb-2">分割点列表:</h3>
-            <div className="grid grid-cols-4 gap-2">
-              {markers.map((time, index) => (
-                <div key={index} className="p-2 bg-muted rounded">
-                  {time.toFixed(2)}s
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <MarkersList markers={markers} />
       </div>
     </div>
   );
