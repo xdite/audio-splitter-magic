@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import { Button } from '@/components/ui/button';
-import { Upload, Play, Pause, Scissors, Download } from 'lucide-react';
+import { Upload, Play, Pause, Scissors, Download, Wand2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
 const AudioSplitter = () => {
@@ -59,6 +59,67 @@ const AudioSplitter = () => {
     });
   };
 
+  const autoDetectSilence = async () => {
+    if (!wavesurfer.current) {
+      toast({
+        title: "错误",
+        description: "请先上传音频文件",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    toast({
+      title: "检测中",
+      description: "正在自动检测静音段落...",
+    });
+
+    try {
+      // 获取音频数据
+      const peaks = wavesurfer.current.backend.getPeaks(1000);
+      const duration = wavesurfer.current.getDuration();
+      const threshold = 0.05; // 静音阈值
+      const minSilenceLength = 0.5; // 最小静音长度（秒）
+      
+      const silencePoints: number[] = [];
+      let isSilent = false;
+      let silenceStart = 0;
+      
+      // 遍历波形数据检测静音段
+      peaks.forEach((peak, index) => {
+        const time = (index / peaks.length) * duration;
+        const amplitude = Math.abs(peak);
+        
+        if (amplitude < threshold && !isSilent) {
+          isSilent = true;
+          silenceStart = time;
+        } else if (amplitude >= threshold && isSilent) {
+          isSilent = false;
+          const silenceLength = time - silenceStart;
+          if (silenceLength >= minSilenceLength) {
+            // 在静音段中间添加标记
+            silencePoints.push(silenceStart + silenceLength / 2);
+          }
+        }
+      });
+
+      // 更新标记点
+      setMarkers(prev => [...new Set([...prev, ...silencePoints])].sort((a, b) => a - b));
+      
+      toast({
+        title: "检测完成",
+        description: `检测到 ${silencePoints.length} 个可能的分割点`,
+      });
+    } catch (error) {
+      console.error('自动检测失败:', error);
+      toast({
+        title: "检测失败",
+        description: "自动检测分割点时发生错误",
+        variant: "destructive",
+      });
+    }
+  };
+
   const exportSegments = async () => {
     if (!audioFile || !wavesurfer.current) {
       toast({
@@ -113,6 +174,11 @@ const AudioSplitter = () => {
             添加分割点
           </Button>
 
+          <Button variant="outline" onClick={autoDetectSilence} disabled={!audioFile}>
+            <Wand2 className="mr-2 h-4 w-4" />
+            自动检测
+          </Button>
+
           <Button variant="outline" onClick={exportSegments} disabled={!audioFile || markers.length === 0}>
             <Download className="mr-2 h-4 w-4" />
             导出片段
@@ -124,7 +190,7 @@ const AudioSplitter = () => {
           {markers.map((time, index) => (
             <div
               key={index}
-              className="timeline-marker"
+              className="absolute h-full w-0.5 bg-purple-500 opacity-50"
               style={{
                 left: `${(time / (wavesurfer.current?.getDuration() || 1)) * 100}%`
               }}
