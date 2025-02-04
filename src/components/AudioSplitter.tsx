@@ -1,41 +1,33 @@
-import React, { useRef, useState, useEffect } from 'react';
+
+import React, { useRef, useState, useCallback } from 'react';
 import WaveSurfer from 'wavesurfer.js';
-import { Button } from '@/components/ui/button';
-import { Upload, Play, Pause, Scissors, Download, Wand2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import WaveformDisplay from './audio/WaveformDisplay';
+import AudioControls from './audio/AudioControls';
+import MarkersList from './audio/MarkersList';
+import { exportWAV, getSegmentColor } from '@/utils/audioProcessing';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 
 const AudioSplitter = () => {
-  const waveformRef = useRef<HTMLDivElement>(null);
   const wavesurfer = useRef<WaveSurfer | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [markers, setMarkers] = useState<number[]>([]);
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const { toast } = useToast();
 
-  useEffect(() => {
-    if (waveformRef.current) {
-      wavesurfer.current = WaveSurfer.create({
-        container: waveformRef.current,
-        waveColor: '#4a5568',
-        progressColor: '#7aa2f7',
-        cursorColor: '#bb9af7',
-        cursorWidth: 2,
-        height: 100,
-        normalize: true,
-      });
+  const handleWaveSurferInit = (ws: WaveSurfer) => {
+    wavesurfer.current = ws;
+    ws.on('play', () => setIsPlaying(true));
+    ws.on('pause', () => setIsPlaying(false));
+  };
 
-      wavesurfer.current.on('play', () => setIsPlaying(true));
-      wavesurfer.current.on('pause', () => setIsPlaying(false));
+  const handleFileUpload = () => {
+    const input = document.getElementById('audio-upload') as HTMLInputElement;
+    input.click();
+  };
 
-      return () => {
-        wavesurfer.current?.destroy();
-      };
-    }
-  }, []);
-
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       setAudioFile(file);
@@ -82,7 +74,6 @@ const AudioSplitter = () => {
         throw new Error('无法获取音频数据');
       }
 
-      const duration = wavesurfer.current.getDuration();
       const sampleRate = audioData.sampleRate;
       const channels = audioData.getChannelData(0);
       
@@ -160,7 +151,8 @@ const AudioSplitter = () => {
     });
 
     try {
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const AudioContext = window.AudioContext;
+      const audioContext = new AudioContext();
       const response = await fetch(URL.createObjectURL(audioFile));
       const arrayBuffer = await response.arrayBuffer();
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
@@ -169,18 +161,13 @@ const AudioSplitter = () => {
       const originalFileName = audioFile.name.replace(/\.[^/.]+$/, "");
       
       const segmentTimes = [0, ...markers, audioBuffer.duration];
-      const offlineAudioContext = new OfflineAudioContext(
-        audioBuffer.numberOfChannels,
-        audioBuffer.length,
-        audioBuffer.sampleRate
-      );
-
+      
       for (let i = 0; i < segmentTimes.length - 1; i++) {
         const startTime = segmentTimes[i];
         const endTime = segmentTimes[i + 1];
         const segmentDuration = endTime - startTime;
         
-        const segmentSamples = segmentDuration * audioBuffer.sampleRate;
+        const segmentSamples = Math.floor(segmentDuration * audioBuffer.sampleRate);
         const segmentContext = new OfflineAudioContext(
           audioBuffer.numberOfChannels,
           segmentSamples,
@@ -216,58 +203,7 @@ const AudioSplitter = () => {
     }
   };
 
-  const exportWAV = (audioBuffer: AudioBuffer): Promise<Blob> => {
-    const interleaved = new Float32Array(audioBuffer.length * audioBuffer.numberOfChannels);
-    const length = audioBuffer.length;
-    
-    for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
-      const channelData = audioBuffer.getChannelData(channel);
-      for (let i = 0; i < length; i++) {
-        interleaved[i * audioBuffer.numberOfChannels + channel] = channelData[i];
-      }
-    }
-
-    const buffer = new ArrayBuffer(44 + interleaved.length * 2);
-    const view = new DataView(buffer);
-    
-    writeUTFBytes(view, 0, 'RIFF');
-    view.setUint32(4, 36 + interleaved.length * 2, true);
-    writeUTFBytes(view, 8, 'WAVE');
-    writeUTFBytes(view, 12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, audioBuffer.numberOfChannels, true);
-    view.setUint32(24, audioBuffer.sampleRate, true);
-    view.setUint32(28, audioBuffer.sampleRate * audioBuffer.numberOfChannels * 2, true);
-    view.setUint16(32, audioBuffer.numberOfChannels * 2, true);
-    view.setUint16(34, 16, true);
-    writeUTFBytes(view, 36, 'data');
-    view.setUint32(40, interleaved.length * 2, true);
-    
-    const volume = 1;
-    let offset = 44;
-    for (let i = 0; i < interleaved.length; i++) {
-      view.setInt16(offset, interleaved[i] * (0x7FFF * volume), true);
-      offset += 2;
-    }
-    
-    return new Promise((resolve) => {
-      resolve(new Blob([buffer], { type: 'audio/wav' }));
-    });
-  };
-
-  const writeUTFBytes = (view: DataView, offset: number, string: string) => {
-    for (let i = 0; i < string.length; i++) {
-      view.setUint8(offset + i, string.charCodeAt(i));
-    }
-  };
-
-  const getSegmentColor = (index: number) => {
-    const colors = ['#F2FCE2', '#FEF7CD', '#FEC6A1', '#E5DEFF', '#FFDEE2', '#FDE1D3', '#D3E4FD'];
-    return colors[index % colors.length];
-  };
-
-  const renderSegments = () => {
+  const renderSegments = useCallback(() => {
     if (!wavesurfer.current || markers.length === 0) return null;
     
     const duration = wavesurfer.current.getDuration();
@@ -308,7 +244,7 @@ const AudioSplitter = () => {
     );
 
     return segments;
-  };
+  }, [markers]);
 
   return (
     <div className="max-w-4xl mx-auto p-6">
@@ -318,42 +254,28 @@ const AudioSplitter = () => {
       </div>
 
       <div className="space-y-6">
-        <div className="flex justify-center gap-4">
-          <Button variant="outline" onClick={() => document.getElementById('audio-upload')?.click()}>
-            <Upload className="mr-2 h-4 w-4" />
-            上传音频
-          </Button>
-          <input
-            id="audio-upload"
-            type="file"
-            accept="audio/*"
-            className="hidden"
-            onChange={handleFileUpload}
-          />
-          
-          <Button variant="outline" onClick={togglePlayPause} disabled={!audioFile}>
-            {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-          </Button>
-
-          <Button variant="outline" onClick={addMarker} disabled={!audioFile}>
-            <Scissors className="mr-2 h-4 w-4" />
-            添加分割点
-          </Button>
-
-          <Button variant="outline" onClick={autoDetectSilence} disabled={!audioFile}>
-            <Wand2 className="mr-2 h-4 w-4" />
-            自动检测
-          </Button>
-
-          <Button variant="outline" onClick={exportSegments} disabled={!audioFile || markers.length === 0}>
-            <Download className="mr-2 h-4 w-4" />
-            导出片段
-          </Button>
-        </div>
+        <AudioControls
+          isPlaying={isPlaying}
+          audioFile={audioFile}
+          markers={markers}
+          onUploadClick={handleFileUpload}
+          onPlayPauseClick={togglePlayPause}
+          onAddMarkerClick={addMarker}
+          onAutoDetectClick={autoDetectSilence}
+          onExportClick={exportSegments}
+        />
+        
+        <input
+          id="audio-upload"
+          type="file"
+          accept="audio/*"
+          className="hidden"
+          onChange={handleFileChange}
+        />
 
         <div className="waveform-container relative">
           {renderSegments()}
-          <div ref={waveformRef} className="relative z-10" />
+          <WaveformDisplay onWaveSurferInit={handleWaveSurferInit} />
           {markers.map((time, index) => (
             <div
               key={index}
@@ -371,18 +293,7 @@ const AudioSplitter = () => {
           ))}
         </div>
 
-        {markers.length > 0 && (
-          <div className="mt-4">
-            <h3 className="text-lg font-semibold mb-2">分割点列表:</h3>
-            <div className="grid grid-cols-4 gap-2">
-              {markers.map((time, index) => (
-                <div key={index} className="p-2 bg-muted rounded">
-                  {time.toFixed(2)}s
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <MarkersList markers={markers} />
       </div>
     </div>
   );
