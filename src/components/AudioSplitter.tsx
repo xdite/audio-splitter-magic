@@ -3,6 +3,8 @@ import WaveSurfer from 'wavesurfer.js';
 import { Button } from '@/components/ui/button';
 import { Upload, Play, Pause, Scissors, Download, Wand2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 
 const AudioSplitter = () => {
   const waveformRef = useRef<HTMLDivElement>(null);
@@ -143,15 +145,121 @@ const AudioSplitter = () => {
       return;
     }
 
+    if (markers.length === 0) {
+      toast({
+        title: "错误",
+        description: "请先添加分割点",
+        variant: "destructive",
+      });
+      return;
+    }
+
     toast({
-      title: "导出中",
+      title: "处理中",
       description: "正在处理音频分段...",
     });
 
-    toast({
-      title: "功能开发中",
-      description: "音频分割功能即将推出",
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const response = await fetch(URL.createObjectURL(audioFile));
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      
+      const zip = new JSZip();
+      const originalFileName = audioFile.name.replace(/\.[^/.]+$/, "");
+      
+      const segmentTimes = [0, ...markers, audioBuffer.duration];
+      const offlineAudioContext = new OfflineAudioContext(
+        audioBuffer.numberOfChannels,
+        audioBuffer.length,
+        audioBuffer.sampleRate
+      );
+
+      for (let i = 0; i < segmentTimes.length - 1; i++) {
+        const startTime = segmentTimes[i];
+        const endTime = segmentTimes[i + 1];
+        const segmentDuration = endTime - startTime;
+        
+        const segmentSamples = segmentDuration * audioBuffer.sampleRate;
+        const segmentContext = new OfflineAudioContext(
+          audioBuffer.numberOfChannels,
+          segmentSamples,
+          audioBuffer.sampleRate
+        );
+        
+        const sourceNode = segmentContext.createBufferSource();
+        sourceNode.buffer = audioBuffer;
+        sourceNode.connect(segmentContext.destination);
+        
+        sourceNode.start(0, startTime, segmentDuration);
+        
+        const segmentBuffer = await segmentContext.startRendering();
+        const wavBlob = await exportWAV(segmentBuffer);
+        
+        zip.file(`${originalFileName}_part${i + 1}.wav`, wavBlob);
+      }
+      
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      saveAs(zipBlob, `${originalFileName}_segments.zip`);
+      
+      toast({
+        title: "完成",
+        description: "音频分段已成功导出",
+      });
+    } catch (error) {
+      console.error('导出失败:', error);
+      toast({
+        title: "错误",
+        description: "音频导出失败",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const exportWAV = (audioBuffer: AudioBuffer): Promise<Blob> => {
+    const interleaved = new Float32Array(audioBuffer.length * audioBuffer.numberOfChannels);
+    const length = audioBuffer.length;
+    
+    for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+      const channelData = audioBuffer.getChannelData(channel);
+      for (let i = 0; i < length; i++) {
+        interleaved[i * audioBuffer.numberOfChannels + channel] = channelData[i];
+      }
+    }
+
+    const buffer = new ArrayBuffer(44 + interleaved.length * 2);
+    const view = new DataView(buffer);
+    
+    writeUTFBytes(view, 0, 'RIFF');
+    view.setUint32(4, 36 + interleaved.length * 2, true);
+    writeUTFBytes(view, 8, 'WAVE');
+    writeUTFBytes(view, 12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, audioBuffer.numberOfChannels, true);
+    view.setUint32(24, audioBuffer.sampleRate, true);
+    view.setUint32(28, audioBuffer.sampleRate * audioBuffer.numberOfChannels * 2, true);
+    view.setUint16(32, audioBuffer.numberOfChannels * 2, true);
+    view.setUint16(34, 16, true);
+    writeUTFBytes(view, 36, 'data');
+    view.setUint32(40, interleaved.length * 2, true);
+    
+    const volume = 1;
+    let offset = 44;
+    for (let i = 0; i < interleaved.length; i++) {
+      view.setInt16(offset, interleaved[i] * (0x7FFF * volume), true);
+      offset += 2;
+    }
+    
+    return new Promise((resolve) => {
+      resolve(new Blob([buffer], { type: 'audio/wav' }));
     });
+  };
+
+  const writeUTFBytes = (view: DataView, offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
   };
 
   const getSegmentColor = (index: number) => {
