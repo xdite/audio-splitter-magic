@@ -151,7 +151,6 @@ const AudioSplitter = () => {
     });
 
     try {
-      const AudioContext = window.AudioContext;
       const audioContext = new AudioContext();
       const response = await fetch(URL.createObjectURL(audioFile));
       const arrayBuffer = await response.arrayBuffer();
@@ -300,3 +299,4 @@ const AudioSplitter = () => {
 };
 
 export default AudioSplitter;
+
