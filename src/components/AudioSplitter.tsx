@@ -13,6 +13,7 @@ const AudioSplitter = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [markers, setMarkers] = useState<number[]>([]);
   const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [isReady, setIsReady] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -29,6 +30,8 @@ const AudioSplitter = () => {
 
       wavesurfer.current.on('play', () => setIsPlaying(true));
       wavesurfer.current.on('pause', () => setIsPlaying(false));
+      wavesurfer.current.on('ready', () => setIsReady(true));
+      wavesurfer.current.on('unload', () => setIsReady(false));
 
       return () => {
         wavesurfer.current?.destroy();
@@ -63,10 +66,10 @@ const AudioSplitter = () => {
   };
 
   const autoDetectSilence = async () => {
-    if (!wavesurfer.current) {
+    if (!wavesurfer.current || !isReady) {
       toast({
         title: "错误",
-        description: "请先上传音频文件",
+        description: "请等待音频加载完成",
         variant: "destructive",
       });
       return;
@@ -106,10 +109,10 @@ const AudioSplitter = () => {
   };
 
   const exportSegments = async () => {
-    if (!audioFile || !wavesurfer.current) {
+    if (!audioFile || !wavesurfer.current || !isReady) {
       toast({
         title: "错误",
-        description: "请先上传音频文件",
+        description: "请等待音频加载完成",
         variant: "destructive",
       });
       return;
