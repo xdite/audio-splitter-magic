@@ -1,4 +1,4 @@
-```typescript
+
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 
@@ -46,7 +46,6 @@ export const getSegmentColor = (index: number) => {
   return colors[index % colors.length];
 };
 
-// 優化的 AudioBuffer 到 Blob 轉換
 const audioBufferToBlob = async (audioBuffer: AudioBuffer, audioContext: AudioContext): Promise<Blob> => {
   return new Promise((resolve) => {
     const mediaStreamDestination = audioContext.createMediaStreamDestination();
@@ -69,7 +68,6 @@ const audioBufferToBlob = async (audioBuffer: AudioBuffer, audioContext: AudioCo
   });
 };
 
-// 優化的音頻分段導出
 export const exportAudioSegments = async (
   audioBuffer: AudioBuffer, 
   markers: number[], 
@@ -80,9 +78,8 @@ export const exportAudioSegments = async (
   const sortedMarkers = [0, ...markers.sort((a, b) => a - b), audioBuffer.duration];
   const audioContext = new AudioContext();
   const totalSegments = sortedMarkers.length - 1;
-  const batchSize = 3; // 每批處理的片段數
+  const batchSize = 3;
 
-  // 批量處理片段
   for (let batchStart = 0; batchStart < totalSegments; batchStart += batchSize) {
     const batchPromises = [];
     const batchEnd = Math.min(batchStart + batchSize, totalSegments);
@@ -92,14 +89,12 @@ export const exportAudioSegments = async (
       const endTime = sortedMarkers[i + 1];
       const duration = endTime - startTime;
       
-      // 創建片段 AudioBuffer
       const segmentBuffer = audioContext.createBuffer(
         1,
         Math.floor(duration * audioBuffer.sampleRate),
         audioBuffer.sampleRate
       );
       
-      // 複製音頻數據
       const channelData = audioBuffer.getChannelData(0);
       const startSample = Math.floor(startTime * audioBuffer.sampleRate);
       const segmentData = channelData.slice(
@@ -108,7 +103,6 @@ export const exportAudioSegments = async (
       );
       segmentBuffer.copyToChannel(segmentData, 0);
       
-      // 將片段轉換為 Blob 的 Promise
       const promise = audioBufferToBlob(segmentBuffer, audioContext)
         .then(blob => {
           zip.file(`segment_${(i + 1).toString().padStart(3, '0')}.mp3`, blob);
@@ -120,11 +114,9 @@ export const exportAudioSegments = async (
       batchPromises.push(promise);
     }
 
-    // 等待當前批次完成
     await Promise.all(batchPromises);
   }
   
-  // 生成並下載 ZIP 檔案
   const content = await zip.generateAsync({ 
     type: 'blob',
     compression: 'DEFLATE',
@@ -135,7 +127,5 @@ export const exportAudioSegments = async (
   const baseFileName = fileName.replace(/\.[^/.]+$/, '');
   saveAs(content, `${baseFileName}_segments.zip`);
 
-  // 清理
   audioContext.close();
 };
-```
