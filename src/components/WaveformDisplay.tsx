@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { getSegmentColor } from '@/utils/audioProcessing';
 
 interface WaveformDisplayProps {
@@ -9,6 +9,38 @@ interface WaveformDisplayProps {
 }
 
 const WaveformDisplay: React.FC<WaveformDisplayProps> = ({ waveformRef, markers, duration }) => {
+  const resizeTimeoutRef = useRef<number>();
+
+  useEffect(() => {
+    const resizeObserver = new ResizeObserver((entries) => {
+      // Debounce resize events
+      if (resizeTimeoutRef.current) {
+        window.clearTimeout(resizeTimeoutRef.current);
+      }
+      
+      resizeTimeoutRef.current = window.setTimeout(() => {
+        // Handle resize after debounce
+        const entry = entries[0];
+        if (entry && waveformRef.current) {
+          // Force wavesurfer to redraw if needed
+          const event = new Event('resize');
+          window.dispatchEvent(event);
+        }
+      }, 250); // 250ms debounce
+    });
+
+    if (waveformRef.current) {
+      resizeObserver.observe(waveformRef.current);
+    }
+
+    return () => {
+      if (resizeTimeoutRef.current) {
+        window.clearTimeout(resizeTimeoutRef.current);
+      }
+      resizeObserver.disconnect();
+    };
+  }, []);
+
   const renderSegments = () => {
     if (markers.length === 0) return null;
     
