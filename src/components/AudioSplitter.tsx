@@ -71,37 +71,55 @@ const AudioSplitter = () => {
 
     toast({
       title: "检测中",
-      description: "正在自动检测静音段落...",
+      description: "正在自动检测音频片段...",
     });
 
     try {
-      // 获取音频数据
-      const peaks = wavesurfer.current.backend.getPeaks(1000);
+      // 使用 getDecodedData 获取音频数据
+      const audioData = wavesurfer.current.getDecodedData();
+      if (!audioData) {
+        throw new Error('无法获取音频数据');
+      }
+
       const duration = wavesurfer.current.getDuration();
-      const threshold = 0.05; // 静音阈值
+      const sampleRate = audioData.sampleRate;
+      const channels = audioData.getChannelData(0); // 获取第一个声道的数据
+      
+      const samplesPerSegment = Math.floor(sampleRate * 0.1); // 每0.1秒一个分析窗口
+      const threshold = 0.05; // 振幅阈值
       const minSilenceLength = 0.5; // 最小静音长度（秒）
       
       const silencePoints: number[] = [];
       let isSilent = false;
       let silenceStart = 0;
+      let currentSum = 0;
       
-      // 遍历波形数据检测静音段
-      peaks.forEach((peak, index) => {
-        const time = (index / peaks.length) * duration;
-        const amplitude = Math.abs(peak);
+      // 分析音频数据
+      for (let i = 0; i < channels.length; i += samplesPerSegment) {
+        // 计算当前窗口的平均振幅
+        currentSum = 0;
+        const segmentEnd = Math.min(i + samplesPerSegment, channels.length);
         
-        if (amplitude < threshold && !isSilent) {
+        for (let j = i; j < segmentEnd; j++) {
+          currentSum += Math.abs(channels[j]);
+        }
+        
+        const averageAmplitude = currentSum / samplesPerSegment;
+        const currentTime = (i / sampleRate);
+        
+        if (averageAmplitude < threshold && !isSilent) {
           isSilent = true;
-          silenceStart = time;
-        } else if (amplitude >= threshold && isSilent) {
+          silenceStart = currentTime;
+        } else if ((averageAmplitude >= threshold || i >= channels.length - samplesPerSegment) && isSilent) {
           isSilent = false;
-          const silenceLength = time - silenceStart;
+          const silenceLength = currentTime - silenceStart;
+          
           if (silenceLength >= minSilenceLength) {
             // 在静音段中间添加标记
             silencePoints.push(silenceStart + silenceLength / 2);
           }
         }
-      });
+      }
 
       // 更新标记点
       setMarkers(prev => [...new Set([...prev, ...silencePoints])].sort((a, b) => a - b));
